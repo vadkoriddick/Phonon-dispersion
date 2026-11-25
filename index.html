@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CIF Phonon Dispersion & DOS — Single-File Solver</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #161a22;
+      --panel-2: #1d222d;
+      --border: #2b3242;
+      --text: #e6eaf2;
+      --muted: #9aa4b8;
+      --accent: #4ea8de;
+      --accent-2: #72efdd;
+      --warn: #f4a261;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 14px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+      padding-bottom: 10px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    header .meta {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 12px;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    .panel h2 {
+      margin: 0 0 8px 0;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      color: var(--accent-2);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 4px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    label {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+    input, select, textarea, button {
+      width: 100%;
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 7px;
+      font-family: inherit;
+      font-size: 11px;
+    }
+    textarea {
+      height: 125px;
+      resize: vertical;
+      line-height: 1.35;
+    }
+    button {
+      cursor: pointer;
+      background: #1f2b3d;
+      border-color: #385073;
+      font-weight: 600;
+    }
+    button:hover { background: #273850; }
+    .btn-primary {
+      background: #1d4e6b;
+      border-color: #3a86b5;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #246084; }
+    .plots {
+      display: grid;
+      grid-template-columns: 2.2fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 1100px) {
+      .plots { grid-template-columns: 1fr; }
+    }
+    canvas {
+      width: 100%;
+      height: 430px;
+      background: #0b0d11;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      display: block;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .stat {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 8px;
+    }
+    .stat .k { color: var(--muted); font-size: 10px; }
+    .stat .v { font-size: 12px; font-weight: 600; margin-top: 2px; }
+    .status {
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CIF Phonon Dispersion &amp; DOS Calculator</h1>
+    <div class="meta">Bond-Projected Dynamical Matrix D(q) · Acoustic Sum Rule Enforced · Standalone Client-Side</div>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="panel">
+        <h2>1. CIF Structure Input</h2>
+        <div class="row">
+          <div>
+            <label for="cifFile">Load .CIF File</label>
+            <input type="file" id="cifFile" accept=".cif,.txt" />
+          </div>
+          <div>
+            <label for="presetSelect">Sample Lattice</label>
+            <select id="presetSelect">
+              <option value="sc">Simple Cubic (1-atom)</option>
+              <option value="diatomic">Diatomic Chain / 2-Basis FCC</option>
+              <option value="fcc">FCC Monatomic</option>
+            </select>
+          </div>
+        </div>
+        <label for="cifText">CIF Content (Fractional or Cartesian Sites)</label>
+        <textarea id="cifText"></textarea>
+        <div id="structStatus" class="status"></div>
+      </div>
+
+      <div class="panel">
+        <h2>2. Force Constants &amp; Path</h2>
+        <div class="row">
+          <div>
+            <label for="phiLong">Longitudinal φ∥ (eV/Å²)</label>
+            <input type="number" id="phiLong" step="0.1" value="6.5" />
+          </div>
+          <div>
+            <label for="phiTrans">Transverse φ⊥ (eV/Å²)</label>
+            <input type="number" id="phiTrans" step="0.1" value="1.4" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="cutoff">Neighbor Cutoff (Å)</label>
+            <input type="number" id="cutoff" step="0.1" value="4.2" />
+          </div>
+          <div>
+            <label for="nSteps">q-Points per Segment</label>
+            <input type="number" id="nSteps" min="5" max="80" step="5" value="25" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="pathPreset">High-Symmetry Path</label>
+            <select id="pathPreset">
+              <option value="cubic">Γ → X → M → Γ → R</option>
+              <option value="gx">Γ → X → Γ</option>
+              <option value="gm">Γ → M → K → Γ</option>
+            </select>
+          </div>
+          <div>
+            <label for="asrToggle">Acoustic Sum Rule</label>
+            <select id="asrToggle">
+              <option value="on" selected>Enforced (ω_ac → 0 at Γ)</option>
+              <option value="off">Raw (Unadjusted)</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn-primary" id="runBtn">Compute Dispersion</button>
+          <button id="exportCsvBtn">Export CSV</button>
+        </div>
+        <button id="exportJsonBtn">Export JSON + Provenance</button>
+        <div id="runStatus" class="status"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>3. Dispersion ω(q) &amp; Density of States</h2>
+        <div class="plots">
+          <canvas id="dispCanvas" width="760" height="430"></canvas>
+          <canvas id="dosCanvas" width="320" height="430"></canvas>
+        </div>
+        <div class="stats" id="statsBar"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const ATOMIC_MASS = {
+  H: 1.008, He: 4.0026, Li: 6.94, Be: 9.0122, B: 10.81, C: 12.011, N: 14.007, O: 15.999,
+  F: 18.998, Na: 22.990, Mg: 24.305, Al: 26.982, Si: 28.085, P: 30.974, S: 32.06, Cl: 35.45,
+  K: 39.098, Ca: 40.078, Ti: 47.867, Fe: 55.845, Cu: 63.546, Zn: 65.38, Ga: 69.723, Ge: 72.63,
+  As: 74.922, Se: 78.971, Nb: 92.906, Mo: 95.95, Sr: 87.62, Ba: 137.33, Pb: 207.2, Bi: 208.98
+};
+
+const PRESETS = {
+  sc: `data_SC_Test
+_cell_length_a   3.60
+_cell_length_b   3.60
+_cell_length_c   3.60
+_cell_angle_alpha 90.0
+_cell_angle_beta  90.0
+_cell_angle_gamma 90.0
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+Si1 Si 0.0 0.0 0.0`,
+  diatomic: `data_Diatomic_RockSalt_Like
+_cell_length_a   4.20
+_cell_length_b   4.20
+_cell_length_c   4.20
+_cell_angle_alpha 90.0
+_cell_angle_beta  90.0
+_cell_angle_gamma 90.0
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+A1 Mg 0.0 0.0 0.0
+B1 O  0.5 0.5 0.5`,
+  fcc: `data_FCC_Cu_Like
+_cell_length_a   3.61
+_cell_length_b   3.61
+_cell_length_c   3.61
+_cell_angle_alpha 90.0
+_cell_angle_beta  90.0
+_cell_angle_gamma 90.0
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+Cu1 Cu 0.0 0.0 0.0
+Cu2 Cu 0.5 0.5 0.0
+Cu3 Cu 0.5 0.0 0.5
+Cu4 Cu 0.0 0.5 0.5`
+};
+
+function cleanNum(tok) {
+  if (!tok) return NaN;
+  const m = tok.match(/^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/);
+  return m ? parseFloat(m[0]) : NaN;
+}
+
+function inferElement(label, symbol) {
+  if (symbol) {
+    const cleanSym = symbol.replace(/[^A-Za-z]/g, "");
+    const two = cleanSym.slice(0, 2);
+    const one = cleanSym.slice(0, 1).toUpperCase();
+    if (ATOMIC_MASS[two.charAt(0).toUpperCase() + two.slice(1).toLowerCase()]) {
+      return two.charAt(0).toUpperCase() + two.slice(1).toLowerCase();
+    }
+    if (ATOMIC_MASS[one]) return one;
+  }
+  const m = (label || "").match(/^([A-Za-z]{1,2})/);
+  if (m) {
+    const cand = m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase();
+    if (ATOMIC_MASS[cand]) return cand;
+    if (ATOMIC_MASS[m[1].charAt(0).toUpperCase()]) return m[1].charAt(0).toUpperCase();
+  }
+  return "Si";
+}
+
+function parseCIF(cifStr) {
+  const lines = cifStr.split(/\r?\n/);
+  let a = 4.0, b = 4.0, c = 4.0;
+  let alpha = 90, beta = 90, gamma = 90;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const parts = line.split(/\s+/);
+    if (parts.length >= 2) {
+      if (parts[0] === "_cell_length_a") a = cleanNum(parts[1]) || a;
+      if (parts[0] === "_cell_length_b") b = cleanNum(parts[1]) || b;
+      if (parts[0] === "_cell_length_c") c = cleanNum(parts[1]) || c;
+      if (parts[0] === "_cell_angle_alpha") alpha = cleanNum(parts[1]) || alpha;
+      if (parts[0] === "_cell_angle_beta") beta = cleanNum(parts[1]) || beta;
+      if (parts[0] === "_cell_angle_gamma") gamma = cleanNum(parts[1]) || gamma;
+    }
+  }
+
+  // Build lattice vectors (rows: a_vec, b_vec, c_vec in Å)
+  const rad = Math.PI / 180;
+  const ca = Math.cos(alpha * rad), cb = Math.cos(beta * rad), cg = Math.cos(gamma * rad);
+  const sg = Math.sin(gamma * rad);
+  const aVec = [a, 0, 0];
+  const bVec = [b * cg, b * sg, 0];
+  const cx = c * cb;
+  const cy = c * (ca - cb * cg) / sg;
+  const cz = Math.sqrt(Math.max(1e-8, c * c - cx * cx - cy * cy));
+  const cVec = [cx, cy, cz];
+
+  // Parse loop_ atom sites
+  const atoms = [];
+  let i = 0;
+  while (i < lines.length) {
+    const t = lines[i].trim();
+    if (t.toLowerCase().startsWith("loop_")) {
+      const headers = [];
+      i++;
+      while (i < lines.length && lines[i].trim().startsWith("_")) {
+        headers.push(lines[i].trim().toLowerCase());
+        i++;
+      }
+      const idxLabel = headers.indexOf("_atom_site_label");
+      const idxSym = headers.indexOf("_atom_site_type_symbol");
+      const idxFx = headers.indexOf("_atom_site_fract_x");
+      const idxFy = headers.indexOf("_atom_site_fract_y");
+      const idxFz = headers.indexOf("_atom_site_fract_z");
+      const idxCx = headers.indexOf("_atom_site_cartn_x");
+      const idxCy = headers.indexOf("_atom_site_cartn_y");
+      const idxCz = headers.indexOf("_atom_site_cartn_z");
+
+      if ((idxFx >= 0 && idxFy >= 0 && idxFz >= 0) || (idxCx >= 0 && idxCy >= 0 && idxCz >= 0)) {
+        while (i < lines.length) {
+          const rowLine = lines[i].trim();
+          if (!rowLine || rowLine.startsWith("#") || rowLine.toLowerCase().startsWith("loop_") || rowLine.startsWith("_") || rowLine.toLowerCase().startsWith("data_")) {
+            break;
+          }
+          const cols = rowLine.split(/\s+/);
+          if (cols.length >= headers.length) {
+            const label = idxLabel >= 0 ? cols[idxLabel] : `Atom${atoms.length + 1}`;
+            const sym = idxSym >= 0 ? cols[idxSym] : label;
+            const elem = inferElement(label, sym);
+            const mass = ATOMIC_MASS[elem] || 28.085;
+            let cart;
+            if (idxFx >= 0 && idxFy >= 0 && idxFz >= 0) {
+              const fx = cleanNum(cols[idxFx]);
+              const fy = cleanNum(cols[idxFy]);
+              const fz = cleanNum(cols[idxFz]);
+              if (![fx, fy, fz].some(Number.isNaN)) {
+                cart = [
+                  fx * aVec[0] + fy * bVec[0] + fz * cVec[0],
+                  fx * aVec[1] + fy * bVec[1] + fz * cVec[1],
+                  fx * aVec[2] + fy * bVec[2] + fz * cVec[2]
+                ];
+                atoms.push({ label, elem, mass, cart });
+              }
+            } else {
+              const x = cleanNum(cols[idxCx]), y = cleanNum(cols[idxCy]), z = cleanNum(cols[idxCz]);
+              if (![x, y, z].some(Number.isNaN)) {
+                atoms.push({ label, elem, mass, cart: [x, y, z] });
+              }
+            }
+          }
+          i++;
+        }
+        continue;
+      }
+    }
+    i++;
+  }
+
+  return { a, b, c, alpha, beta, gamma, aVec, bVec, cVec, atoms };
+}
+
+function cross(u, v) {
+  return [
+    u[1] * v[2] - u[2] * v[1],
+    u[2] * v[0] - u[0] * v[2],
+    u[0] * v[1] - u[1] * v[0]
+  ];
+}
+
+function dot(u, v) {
+  return u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+}
+
+function reciprocalVectors(aVec, bVec, cVec) {
+  const vol = Math.abs(dot(aVec, cross(bVec, cVec))) || 1;
+  const scale = (2 * Math.PI) / vol;
+  const b1 = cross(bVec, cVec).map(x => x * scale);
+  const b2 = cross(cVec, aVec).map(x => x * scale);
+  const b3 = cross(aVec, bVec).map(x => x * scale);
+  return { b1, b2, b3 };
+}
+
+// Symmetric Jacobi eigenvalue solver for real symmetric n x n matrix
+function jacobiEigen(A) {
+  const n = A.length;
+  const M = A.map(row => row.slice());
+  const maxIter = 80 * n * n;
+  for (let iter = 0; iter < maxIter; iter++) {
+    let p = 0, q = 1, maxVal = Math.abs(M[0][1]);
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const v = Math.abs(M[i][j]);
+        if (v > maxVal) { maxVal = v; p = i; q = j; }
+      }
+    }
+    if (maxVal < 1e-11) break;
+    const diff = M[q][q] - M[p][p];
+    let t;
+    if (Math.abs(diff) < 1e-14) {
+      t = 1;
+    } else {
+      const phi = diff / (2 * M[p][q]);
+      t = 1 / (Math.abs(phi) + Math.sqrt(1 + phi * phi));
+      if (phi < 0) t = -t;
+    }
+    const c = 1 / Math.sqrt(1 + t * t);
+    const s = t * c;
+    const tau = s / (1 + c);
+    const mpq = M[p][q];
+    M[p][q] = 0;
+    M[p][p] -= t * mpq;
+    M[q][q] += t * mpq;
+
+    for (let r = 0; r < n; r++) {
+      if (r !== p && r !== q) {
+        const mrp = M[r][p], mrq = M[r][q];
+        M[r][p] = M[p][r] = mrp - s * (mrq + tau * mrp);
+        M[r][q] = M[q][r] = mrq + s * (mrp - tau * mrq);
+      }
+    }
+  }
+  const vals = [];
+  for (let i = 0; i < n; i++) vals.push(M[i][i]);
+  return vals.sort((x, y) => x - y);
+}
+
+function buildInteractions(structure, phiL, phiT, cutoff, enforceASR) {
+  const N = structure.atoms.length;
+  const { aVec, bVec, cVec, atoms } = structure;
+  // Neighbor shell search across lattice translations
+  const nx = Math.ceil(cutoff / structure.a) + 1;
+  const ny = Math.ceil(cutoff / structure.b) + 1;
+  const nz = Math.ceil(cutoff / structure.c) + 1;
+
+  // Store terms per reference atom kappa (0..N-1): { kappaPrime, Rvec, phiMat[3][3] }
+  const terms = Array.from({ length: N }, () => []);
+
+  for (let k = 0; k < N; k++) {
+    const rk = atoms[k].cart;
+    for (let ix = -nx; ix <= nx; ix++) {
+      for (let iy = -ny; iy <= ny; iy++) {
+        for (let iz = -nz; iz <= nz; iz++) {
+          const R = [
+            ix * aVec[0] + iy * bVec[0] + iz * cVec[0],
+            ix * aVec[1] + iy * bVec[1] + iz * cVec[1],
+            ix * aVec[2] + iy * bVec[2] + iz * cVec[2]
+          ];
+          for (let kp = 0; kp < N; kp++) {
+            const rkp = atoms[kp].cart;
+            const dx = (rkp[0] + R[0]) - rk[0];
+            const dy = (rkp[1] + R[1]) - rk[1];
+            const dz = (rkp[2] + R[2]) - rk[2];
+            const dist = Math.hypot(dx, dy, dz);
+            if (dist > 1e-4 && dist <= cutoff) {
+              // Smooth decay with distance so multi-shell cutoffs stay physical
+              const weight = Math.exp(-(dist - cutoff * 0.55) / (cutoff * 0.45));
+              const u = [dx / dist, dy / dist, dz / dist];
+              const phi = Array.from({ length: 3 }, (_, i) =>
+                Array.from({ length: 3 }, (_, j) =>
+                  weight * (phiL * u[i] * u[j] + phiT * ((i === j ? 1 : 0) - u[i] * u[j]))
+                )
+              );
+              terms[k].push({ kp, R, phi });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Acoustic sum rule: Phi(0)_{k, k} = - sum_{(R, kp) != (0, k)} Phi(R)_{k, kp}
+  if (enforceASR) {
+    for (let k = 0; k < N; k++) {
+      const selfPhi = Array.from({ length: 3 }, () => [0, 0, 0]);
+      for (const t of terms[k]) {
+        for (let i = 0; i < 3; i++) {
+          for (let j = 0; j < 3; j++) {
+            selfPhi[i][j] -= t.phi[i][j];
+          }
+        }
+      }
+      terms[k].push({ kp: k, R: [0, 0, 0], phi: selfPhi });
+    }
+  }
+
+  return terms;
+}
+
+function evalDynamicalEigenvalues(structure, terms, qVec) {
+  const N = structure.atoms.length;
+  const dim = 3 * N;
+  const D = Array.from({ length: dim }, () => new Array(dim).fill(0));
+  const masses = structure.atoms.map(a => a.mass);
+
+  for (let k = 0; k < N; k++) {
+    for (const t of terms[k]) {
+      const kp = t.kp;
+      const phase = Math.cos(dot(qVec, t.R)); // real symmetric part for fast real Jacobi diagonalization
+      const norm = 1 / Math.sqrt(masses[k] * masses[kp]);
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          D[3 * k + i][3 * kp + j] += norm * t.phi[i][j] * phase;
+        }
+      }
+    }
+  }
+
+  // Symmetrize numerically
+  for (let i = 0; i < dim; i++) {
+    for (let j = i + 1; j < dim; j++) {
+      const avg = 0.5 * (D[i][j] + D[j][i]);
+      D[i][j] = D[j][i] = avg;
+    }
+  }
+
+  const eigvals = jacobiEigen(D);
+  // Convert omega^2 to pseudo-frequency scale (arbitrary model units; imaginary shown as negative)
+  return eigvals.map(w2 => (w2 >= 0 ? Math.sqrt(w2) : -Math.sqrt(-w2)));
+}
+
+function getHighSymmetryPath(b1, b2, b3, preset, stepsPerSeg) {
+  const lin = (p, q, n) => {
+    const out = [];
+    for (let s = 0; s <= n; s++) {
+      const f = s / n;
+      out.push([
+        p[0] * (1 - f) + q[0] * f,
+        p[1] * (1 - f) + q[1] * f,
+        p[2] * (1 - f) + q[2] * f
+      ]);
+    }
+    return out;
+  };
+  const combine = (u, v, w) => [
+    u * b1[0] + v * b2[0] + w * b3[0],
+    u * b1[1] + v * b2[1] + w * b3[1],
+    u * b1[2] + v * b2[2] + w * b3[2]
+  ];
+
+  const G = combine(0, 0, 0);
+  const X = combine(0.5, 0, 0);
+  const M = combine(0.5, 0.5, 0);
+  const R = combine(0.5, 0.5, 0.5);
+  const K = combine(0.375, 0.375, 0);
+
+  let nodes;
+  if (preset === "gx") nodes = [["Γ", G], ["X", X], ["Γ", G]];
+  else if (preset === "gm") nodes = [["Γ", G], ["M", M], ["K", K], ["Γ", G]];
+  else nodes = [["Γ", G], ["X", X], ["M", M], ["Γ", G], ["R", R]];
+
+  const qPoints = [];
+  const ticks = [{ label: nodes[0][0], dist: 0 }];
+  let totalDist = 0;
+
+  for (let seg = 0; seg < nodes.length - 1; seg++) {
+    const [l0, p0] = nodes[seg];
+    const [l1, p1] = nodes[seg + 1];
+    const segLen = Math.hypot(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]) || 1;
+    const pts = lin(p0, p1, stepsPerSeg);
+    for (let s = (seg === 0 ? 0 : 1); s < pts.length; s++) {
+      const prev = qPoints.length ? qPoints[qPoints.length - 1].q : p0;
+      const d = Math.hypot(pts[s][0] - prev[0], pts[s][1] - prev[1], pts[s][2] - prev[2]);
+      totalDist += d;
+      qPoints.push({ q: pts[s], dist: totalDist, seg: `${l0}→${l1}` });
+    }
+    ticks.push({ label: l1, dist: totalDist });
+  }
+  return { qPoints, ticks, totalDist };
+}
+
+function drawPlots(dispData, dosBins) {
+  const dCanvas = document.getElementById("dispCanvas");
+  const dCtx = dCanvas.getContext("2d");
+  const W = dCanvas.width, H = dCanvas.height;
+  dCtx.clearRect(0, 0, W, H);
+
+  const pad = { l: 48, r: 16, t: 24, b: 36 };
+  const pw = W - pad.l - pad.r;
+  const ph = H - pad.t - pad.b;
+
+  const allVals = dispData.qPoints.flatMap(p => p.freqs);
+  const minW = Math.min(0, ...allVals);
+  const maxW = Math.max(1, ...allVals);
+  const maxD = dispData.totalDist || 1;
+
+  const xMap = d => pad.l + (d / maxD) * pw;
+  const yMap = w => pad.t + ph - ((w - minW) / (maxW - minW)) * ph;
+
+  // Grid & symmetry lines
+  dCtx.strokeStyle = "#232936";
+  dCtx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const w = minW + (i / 5) * (maxW - minW);
+    const y = yMap(w);
+    dCtx.beginPath(); dCtx.moveTo(pad.l, y); dCtx.lineTo(W - pad.r, y); dCtx.stroke();
+    dCtx.fillStyle = "#8d97ab";
+    dCtx.font = "10px monospace";
+    dCtx.fillText(w.toFixed(1), 6, y + 3);
+  }
+
+  // Zero line if negative (soft/imaginary) modes exist
+  if (minW < 0) {
+    const y0 = yMap(0);
+    dCtx.strokeStyle = "#b55555";
+    dCtx.setLineDash([4, 4]);
+    dCtx.beginPath(); dCtx.moveTo(pad.l, y0); dCtx.lineTo(W - pad.r, y0); dCtx.stroke();
+    dCtx.setLineDash([]);
+  }
+
+  dCtx.fillStyle = "#c8d0e0";
+  for (const t of dispData.ticks) {
+    const x = xMap(t.dist);
+    dCtx.strokeStyle = "#323b4e";
+    dCtx.beginPath(); dCtx.moveTo(x, pad.t); dCtx.lineTo(x, H - pad.b); dCtx.stroke();
+    dCtx.fillText(t.label, x - 4, H - 14);
+  }
+
+  // Branches
+  const nBranches = dispData.qPoints[0].freqs.length;
+  const palette = ["#4ea8de", "#72efdd", "#f4a261", "#e76f51", "#a8dadc", "#cdb4db", "#ffd166", "#90be6d"];
+  for (let b = 0; b < nBranches; b++) {
+    dCtx.strokeStyle = palette[b % palette.length];
+    dCtx.lineWidth = 1.6;
+    dCtx.beginPath();
+    dispData.qPoints.forEach((pt, idx) => {
+      const x = xMap(pt.dist);
+      const y = yMap(pt.freqs[b]);
+      if (idx === 0) dCtx.moveTo(x, y); else dCtx.lineTo(x, y);
+    });
+    dCtx.stroke();
+  }
+
+  dCtx.fillStyle = "#e6eaf2";
+  dCtx.font = "11px monospace";
+  dCtx.fillText("Phonon Dispersion ω(q) [model units]", pad.l, 14);
+
+  // DOS Canvas
+  const gCanvas = document.getElementById("dosCanvas");
+  const gCtx = gCanvas.getContext("2d");
+  const gW = gCanvas.width, gH = gCanvas.height;
+  gCtx.clearRect(0, 0, gW, gH);
+
+  const gPad = { l: 14, r: 16, t: 24, b: 36 };
+  const gw = gW - gPad.l - gPad.r;
+  const gh = gH - gPad.t - gPad.b;
+  const maxDos = Math.max(1e-6, ...dosBins.map(b => b.count));
+
+  gCtx.fillStyle = "#e6eaf2";
+  gCtx.font = "11px monospace";
+  gCtx.fillText("Phonon DOS g(ω)", gPad.l, 14);
+
+  for (const bin of dosBins) {
+    const yTop = yMap(bin.hi);
+    const yBot = yMap(bin.lo);
+    const barH = Math.max(1, Math.abs(yBot - yTop));
+    const barW = (bin.count / maxDos) * gw;
+    gCtx.fillStyle = bin.hi <= 0 ? "rgba(231, 111, 81, 0.65)" : "rgba(78, 168, 222, 0.72)";
+    gCtx.fillRect(gPad.l, Math.min(yTop, yBot), barW, barH);
+  }
+  gCtx.strokeStyle = "#323b4e";
+  gCtx.strokeRect(gPad.l, gPad.t, gw, gh);
+  gCtx.fillStyle = "#8d97ab";
+  gCtx.font = "10px monospace";
+  gCtx.fillText("DOS (norm.)", gPad.l, gH - 14);
+}
+
+let lastResult = null;
+
+function runCalculation() {
+  const cifText = document.getElementById("cifText").value;
+  const phiL = parseFloat(document.getElementById("phiLong").value) || 0;
+  const phiT = parseFloat(document.getElementById("phiTrans").value) || 0;
+  const cutoff = parseFloat(document.getElementById("cutoff").value) || 4.0;
+  const nSteps = Math.max(5, parseInt(document.getElementById("nSteps").value, 10) || 20);
+  const pathPreset = document.getElementById("pathPreset").value;
+  const enforceASR = document.getElementById("asrToggle").value === "on";
+
+  const structure = parseCIF(cifText);
+  if (!structure.atoms.length) {
+    document.getElementById("runStatus").textContent = "No valid atom sites found in CIF.";
+    return;
+  }
+
+  document.getElementById("structStatus").textContent =
+    `Cell: a=${structure.a.toFixed(2)} b=${structure.b.toFixed(2)} c=${structure.c.toFixed(2)} Å | ` +
+    `Atoms: ${structure.atoms.length} (${structure.atoms.map(x => x.elem).join(", ")})`;
+
+  const { b1, b2, b3 } = reciprocalVectors(structure.aVec, structure.bVec, structure.cVec);
+  const terms = buildInteractions(structure, phiL, phiT, cutoff, enforceASR);
+  const { qPoints, ticks, totalDist } = getHighSymmetryPath(b1, b2, b3, pathPreset, nSteps);
+
+  const computedPts = qPoints.map(pt => ({
+    ...pt,
+    freqs: evalDynamicalEigenvalues(structure, terms, pt.q)
+  }));
+
+  // Build DOS histogram
+  const allF = computedPts.flatMap(p => p.freqs);
+  const fMin = Math.min(...allF), fMax = Math.max(...allF);
+  const nBins = 40;
+  const span = (fMax - fMin) || 1;
+  const dosBins = Array.from({ length: nBins }, (_, idx) => ({
+    lo: fMin + (idx / nBins) * span,
+    hi: fMin + ((idx + 1) / nBins) * span,
+    count: 0
+  }));
+  for (const val of allF) {
+    const bIdx = Math.min(nBins - 1, Math.max(0, Math.floor(((val - fMin) / span) * nBins)));
+    dosBins[bIdx].count += 1 / allF.length;
+  }
+
+  lastResult = {
+    generated_utc: new Date().toISOString(),
+    parameters: { phiL, phiT, cutoff, nSteps, pathPreset, enforceASR },
+    cell: { a: structure.a, b: structure.b, c: structure.c, nAtoms: structure.atoms.length },
+    qPoints: computedPts,
+    ticks,
+    totalDist,
+    dosBins
+  };
+
+  drawPlots(lastResult, dosBins);
+
+  const gammaMin = Math.min(...computedPts[0].freqs);
+  const maxFreq = Math.max(...allF);
+  const softCount = allF.filter(v => v < -1e-4).length;
+
+  document.getElementById("statsBar").innerHTML = `
+    <div class="stat"><div class="k">Branches (3N)</div><div class="v">${3 * structure.atoms.length}</div></div>
+    <div class="stat"><div class="k">q-Points Sampled</div><div class="v">${computedPts.length}</div></div>
+    <div class="stat"><div class="k">Min ω at Γ</div><div class="v">${gammaMin.toFixed(4)}</div></div>
+    <div class="stat"><div class="k">Max ω</div><div class="v">${maxFreq.toFixed(4)}</div></div>
+    <div class="stat"><div class="k">Soft/Imaginary</div><div class="v">${softCount}</div></div>
+  `;
+  document.getElementById("runStatus").textContent = "Dispersion & DOS updated.";
+}
+
+function downloadFile(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById("presetSelect").addEventListener("change", e => {
+  document.getElementById("cifText").value = PRESETS[e.target.value] || PRESETS.sc;
+  runCalculation();
+});
+document.getElementById("cifFile").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    document.getElementById("cifText").value = ev.target.result;
+    runCalculation();
+  };
+  reader.readAsText(file);
+});
+document.getElementById("runBtn").addEventListener("click", runCalculation);
+document.getElementById("exportCsvBtn").addEventListener("click", () => {
+  if (!lastResult) return;
+  const nB = lastResult.qPoints[0].freqs.length;
+  const header = ["q_dist", "segment", ...Array.from({ length: nB }, (_, i) => `omega_${i + 1}`)].join(",");
+  const rows = lastResult.qPoints.map(p => [p.dist.toFixed(6), p.seg, ...p.freqs.map(f => f.toFixed(6))].join(","));
+  downloadFile("phonon_dispersion.csv", [header, ...rows].join("\n"), "text/csv");
+});
+document.getElementById("exportJsonBtn").addEventListener("click", () => {
+  if (!lastResult) return;
+  downloadFile("phonon_dispersion_provenance.json", JSON.stringify(lastResult, null, 2), "application/json");
+});
+
+// Initialize default
+document.getElementById("cifText").value = PRESETS.sc;
+runCalculation();
+</script>
+</body>
+</html>
+
